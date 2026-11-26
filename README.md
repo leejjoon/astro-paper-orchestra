@@ -107,7 +107,7 @@ python run_steps.py write      --workdir work/paper1   # -> latex_writeup/raw_dr
 python run_steps.py refine     --workdir work/paper1 --rounds 1   # -> refine/round_N/
 python run_steps.py status     --workdir work/paper1
 ```
-`templates/aastex7` is an AAS journals (AASTeX v7.0.1) template with astronomy-specific writing guidelines.
+`templates/aastex7` is an AAS journals (AASTeX v7.0.1) template with astronomy-specific writing guidelines. `templates/openjournal` is the same for The Open Journal of Astrophysics (`openjournal.cls`, with `aasjournalmacros.sty` so ADS BibTeX journal macros resolve, and `aasjournal.bst`).
 
 ### Interactive Demo
 

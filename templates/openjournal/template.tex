@@ -1,0 +1,108 @@
+\documentclass[onecolumn]{openjournal}
+
+%% The Open Journal of Astrophysics manuscript (openjournal.cls).
+%% openjournal.cls loads natbib (author-year), graphicx, amssymb and longtable,
+%% and provides deluxetable. aasjournalmacros.sty supplies the journal macros
+%% (\apj, \aap, \mnras, \jqsrt, ...) used by NASA ADS BibTeX entries.
+
+\usepackage{amsmath}
+\usepackage{aasjournalmacros}
+\usepackage[colorlinks=true,allcolors=blue]{hyperref}
+
+\newcommand{\software}[1]{\par\vspace{2mm}\noindent\textit{Software:} #1\par}
+\newcommand{\facilities}[1]{\par\vspace{2mm}\noindent\textit{Facilities:} #1\par}
+
+\begin{document}
+
+\title{Paper Title}
+
+%%%%%%%%% AUTHORS - KEEP AS PROVIDED %%%%%%%%%
+\author{First Author}
+\email{author@example.org}
+\affiliation{Institution}
+%%%%%%%%% AUTHORS - KEEP AS PROVIDED %%%%%%%%%
+
+\begin{abstract}
+%%%%%%%%% ABSTRACT %%%%%%%%%
+Abstract here.
+%%%%%%%%% ABSTRACT %%%%%%%%%
+\end{abstract}
+
+%%%%%%%%% KEYWORDS - KEEP AS PROVIDED %%%%%%%%%
+\keywords{keyword one --- keyword two}
+%%%%%%%%% KEYWORDS - KEEP AS PROVIDED %%%%%%%%%
+
+\maketitle
+
+\section{Introduction}
+\label{sec:intro}
+%%%%%%%%% INTRODUCTION %%%%%%%%%
+Introduction here.
+%%%%%%%%% INTRODUCTION %%%%%%%%%
+
+\section{Related Work}
+\label{sec:related_work}
+%%%%%%%%% RELATED WORK %%%%%%%%%
+Review of previous work here.
+%%%%%%%%% RELATED WORK %%%%%%%%%
+
+\section{Data}
+\label{sec:data}
+%%%%%%%%% DATA %%%%%%%%%
+Observations, instruments, and data reduction here.
+%%%%%%%%% DATA %%%%%%%%%
+
+\section{Method}
+\label{sec:method}
+%%%%%%%%% METHOD %%%%%%%%%
+Method here.
+%%%%%%%%% METHOD %%%%%%%%%
+
+\section{Results}
+\label{sec:results}
+%%%%%%%%% RESULTS %%%%%%%%%
+Results here.
+%%%%%%%%% RESULTS %%%%%%%%%
+
+\section{Discussion}
+\label{sec:discussion}
+%%%%%%%%% DISCUSSION %%%%%%%%%
+Discussion here.
+%%%%%%%%% DISCUSSION %%%%%%%%%
+
+\section{Summary}
+\label{sec:summary}
+%%%%%%%%% SUMMARY %%%%%%%%%
+Summary and conclusions here.
+%%%%%%%%% SUMMARY %%%%%%%%%
+
+\section*{Data Availability}
+%%%%%%%%% DATA AVAILABILITY %%%%%%%%%
+Data availability statement here.
+%%%%%%%%% DATA AVAILABILITY %%%%%%%%%
+
+\acknowledgments
+%%%%%%%%% ACKNOWLEDGMENTS - KEEP AS PROVIDED %%%%%%%%%
+Acknowledgments here.
+% The Open Journal of Astrophysics requires a declaration here of any use of generative AI,
+% written by the authors (and, if it was used for calculation, analysis or visualization,
+% how those results were tested and validated).
+%%%%%%%%% ACKNOWLEDGMENTS - KEEP AS PROVIDED %%%%%%%%%
+
+%%%%%%%%% FACILITIES AND SOFTWARE %%%%%%%%%
+% \facilities{}
+% \software{}
+%%%%%%%%% FACILITIES AND SOFTWARE %%%%%%%%%
+
+%%%%%%%%% REFERENCES %%%%%%%%%
+\bibliographystyle{aasjournal}
+\bibliography{references}
+%%%%%%%%% REFERENCES %%%%%%%%%
+
+%%%%%%%%% Appendix %%%%%%%%%
+% If you want an appendix, uncomment the following lines:
+% \appendix
+% \section{xxx}
+%%%%%%%%% Appendix %%%%%%%%%
+
+\end{document}

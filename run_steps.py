@@ -18,6 +18,8 @@ Steps (run in this order; `plotting` and `add-figure` are optional):
     add-figure  register your own figure file + caption for the writer to use
     write       -> latex_writeup/raw_draft_paper.tex (+ compiled raw_draft_paper.pdf)
     refine      -> refine/round_N/ (reviewer feedback, revised .tex and .pdf)
+    factcheck   list numbers in a draft that are not in the materials
+    citecheck   check every citation against the cited paper's full text (papertrail corpus)
     status      show what has been done and where the files are
 
 Examples:
@@ -30,7 +32,12 @@ Examples:
         --caption "Telluric transmission in the H band ..."
     python run_steps.py write --workdir work/paper1
     python run_steps.py refine --workdir work/paper1 --rounds 1
+    python run_steps.py factcheck --workdir work/paper1
     python run_steps.py status --workdir work/paper1
+
+Must-cite references: put `must_cite.txt` (ADS bibcodes, one `bibcode | intro|body | note`
+per line) and/or `must_cite.bib` (raw BibTeX for what ADS lacks) in the materials folder;
+`literature` registers them before searching.
 
 Models are stored in <workdir>/config.json (set them at `init`, edit the file, or pass
 --model to a step to override it for that run).
@@ -266,6 +273,8 @@ def cmd_literature(args):
         output_dir=work.lit_dir,
         model_name=model,
         max_workers=cfg["literature_max_workers"],
+        must_cite_path=osp.join(work.materials, "must_cite.txt"),
+        must_cite_bib_path=osp.join(work.materials, "must_cite.bib"),
     )
     agent.run(outline_path=work.outline, cutoff_date=cfg["research_cutoff"])
 
@@ -435,6 +444,86 @@ def cmd_refine(args):
     )
 
 
+def latest_tex(work: Work) -> str:
+    rounds = work.refine_rounds()
+    if rounds:
+        tex = osp.join(work.refine_dir, rounds[-1], "final_refined_paper.tex")
+        if osp.exists(tex):
+            return tex
+    return work.draft
+
+
+def cmd_factcheck(args):
+    from utils.factcheck import artifact_check, check, figure_captions, write_report
+
+    work = Work(args.workdir)
+    work.load_config()
+    tex_path = osp.abspath(args.tex) if args.tex else latest_tex(work)
+    require(tex_path, "Nothing to check yet; run `write` first or pass --tex.")
+    sources = {}
+    for path in [work.idea, work.log] + [osp.abspath(x) for x in args.sources or []]:
+        require(path, "Source file not found.")
+        with open(path, encoding="utf-8", errors="replace") as f:
+            sources[path] = f.read()
+    sources["figure captions (figures/info.json)"] = figure_captions(work.figures_info)
+    with open(tex_path, encoding="utf-8") as f:
+        tex = f.read()
+    findings = check(tex, sources)
+    artifacts = artifact_check(tex)
+    out = osp.splitext(tex_path)[0] + "_factcheck.md"
+    write_report(findings, tex_path, sources, out, artifacts)
+    for x in artifacts:
+        print(f"   LEFTOVER l.{x['line']:<5} {x['match']!r}: {x['context'][:90]}")
+    print(f"{len(artifacts)} possible LLM leftovers; "
+          f"{len(findings)} numbers in {tex_path} are not in the sources.")
+    for x in findings[: args.show]:
+        print(f"   l.{x['line']:<5} {x['number']:>12}   {x['context'][:90]}")
+    if len(findings) > args.show:
+        print(f"   ... ({len(findings) - args.show} more)")
+    print(f"Report: {out}")
+
+
+def cmd_citecheck(args):
+    from utils import citecheck
+    from utils.llm_backend_utils import call_llm_with_text_prompt
+
+    work = Work(args.workdir)
+    cfg = work.load_config()
+    model = args.model or cfg.get("citecheck_model") or cfg["writer_model"]
+    tex_path = osp.abspath(args.tex) if args.tex else latest_tex(work)
+    require(tex_path, "Nothing to check yet; run `write` first or pass --tex.")
+    bib_path = osp.join(osp.dirname(tex_path), "references.bib")
+    if not osp.exists(bib_path):
+        bib_path = osp.join(work.lit_dir, "references.bib")
+    corpus_root = osp.abspath(args.corpus or cfg.get("refs_corpus") or "")
+    sqlite_path = osp.join(corpus_root, "data", "kb.sqlite")
+    require(sqlite_path, "No papertrail corpus index; pass --corpus or set refs_corpus in config.json.")
+    tex = open(tex_path, encoding="utf-8").read()
+    bib = open(bib_path, encoding="utf-8").read()
+    extra = json.load(open(args.extra_claims)) if args.extra_claims else None
+
+    def llm(prompt):
+        r = call_llm_with_text_prompt(prompt, model, generation_configs={"temperature": 0.0},
+                                      check_parsed_response_not_none=False)
+        return r.get("parsed_response")
+
+    stem = osp.splitext(tex_path)[0] + (f"_{args.label}" if args.label else "")
+    t0 = time.time()
+    rows = citecheck.run(tex, bib, sqlite_path, model, osp.join(work.root, "citecheck_cache.json"),
+                         llm, keys=args.keys, extra_claims=extra)
+    published = {}
+    if not args.no_publish:
+        published = citecheck.publish(
+            citecheck.answer_payloads(rows), corpus_root,
+            args.papertrail_python or cfg.get("papertrail_python"),
+            osp.join(REPO_DIR, "utils", "papertrail_publish.py"), stem + "_citecheck_payloads.json")
+    counts = citecheck.write_report(rows, published, tex_path, stem + "_citecheck.md",
+                                    stem + "_citecheck.json", model,
+                                    os.environ.get("WEBAPP_BASE_URL", "http://127.0.0.1:8000"))
+    print("   " + ", ".join(f"{k}: {v}" for k, v in counts.items() if v))
+    report(t0, [stem + "_citecheck.md", stem + "_citecheck.json"])
+
+
 def cmd_status(args):
     work = Work(args.workdir)
     cfg = work.load_config()
@@ -501,6 +590,20 @@ def main():
     sp = add("refine", cmd_refine, "Review and revise the draft (one new round folder per run).")
     sp.add_argument("--rounds", type=int, default=1, help="Review/revise iterations in this run.")
     sp.add_argument("--from-tex", help="Refine this .tex instead of the latest result.")
+
+    sp = add("factcheck", cmd_factcheck, "List unsupported numbers in a draft.", model=False)
+    sp.add_argument("--tex", help="Draft to check (default: latest refined, else raw draft).")
+    sp.add_argument("--sources", nargs="*", help="Extra source files (e.g. current JSON reports).")
+    sp.add_argument("--show", type=int, default=30, help="How many findings to print.")
+
+    sp = add("citecheck", cmd_citecheck, "Check each citation against the cited paper's full text.")
+    sp.add_argument("--tex", help="Draft to check (default: latest refined, else raw draft).")
+    sp.add_argument("--corpus", help="papertrail corpus root (default: refs_corpus in config.json).")
+    sp.add_argument("--papertrail-python", help="papertrail's Python (default: papertrail_python in config.json).")
+    sp.add_argument("--keys", nargs="*", help="Check only these citation keys.")
+    sp.add_argument("--extra-claims", help="JSON list of extra claims (controls) to check.")
+    sp.add_argument("--label", help="Suffix for the report file names.")
+    sp.add_argument("--no-publish", action="store_true", help="Do not store answers in papertrail.")
 
     add("status", cmd_status, "Show progress.", model=False)
 
