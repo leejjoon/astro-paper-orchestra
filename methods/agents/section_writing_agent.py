@@ -78,6 +78,22 @@ class SectionWritingAgent:
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
 
+    @staticmethod
+    def _pdf_figure_preview(pdf_path: str, dpi: int = 110):
+        import os
+        try:
+            import pymupdf  # type: ignore
+
+            preview_dir = os.path.join(os.path.dirname(pdf_path), ".previews")
+            os.makedirs(preview_dir, exist_ok=True)
+            out = os.path.join(preview_dir, os.path.basename(pdf_path) + ".png")
+            with pymupdf.open(pdf_path) as doc:
+                doc[0].get_pixmap(dpi=dpi).save(out)
+            return out
+        except Exception as e:
+            print(f" > Warning: could not render preview of {pdf_path}: {e}")
+            return None
+
     def _format_figures_context(self, figures_info: List[Dict]) -> str:
         """
         Parses the specific figures_info.json format.
@@ -156,9 +172,13 @@ class SectionWritingAgent:
                         ):
                             name += ".png"
                         img_path = os.path.join(figures_dir, name)
-                        if os.path.exists(img_path) and not name.endswith(
-                            ".pdf"
-                        ):  # We can only pass raster images, not PDFs, to Vertex Vision
+                        if not os.path.exists(img_path):
+                            continue
+                        if name.endswith(".pdf"):
+                            # Vision models take raster images: show a PNG preview
+                            # of the PDF figure's first page.
+                            img_path = self._pdf_figure_preview(img_path)
+                        if img_path:
                             image_paths.append(img_path)
 
         except Exception as e:

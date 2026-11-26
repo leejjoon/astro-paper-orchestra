@@ -26,7 +26,12 @@ from methods.prompts.literature_review_agent import (
     literature_review_agent_writter_prompt,
 )
 from utils.gemini_utils import call_gemini_with_contents, parse_gemini_latex_results
-from utils.scholar_utils import s2_title_search
+from utils.scholar_utils import (
+    paper_title_search,
+    ads_export_bibtex,
+    LIT_SEARCH_BACKEND,
+    SEARCH_DELAY_SEC,
+)
 
 
 class CandidatePaper(BaseModel):
@@ -54,6 +59,7 @@ class PaperData(BaseModel):
     volume: Optional[str] = None
     pages: Optional[str] = None
     publication_date: Optional[str] = None
+    bibcode: Optional[str] = None
 
 
 class WriterOutput(BaseModel):
@@ -197,13 +203,13 @@ class HybridLiteratureAgent:
                     )
 
         self._safe_print(
-            f"   📊 Phase 1b: Semantic Scholar Enrichment (Rate-limited, sequential)..."
+            f"   📊 Phase 1b: {LIT_SEARCH_BACKEND.upper()} Enrichment (Rate-limited, sequential)..."
         )
         import time
 
         for item in all_candidates_with_tasks:
-            # wait 1s per query to avoid SS rate limits!
-            time.sleep(1.0)
+            # pace lookups to respect the bibliographic API's rate limits
+            time.sleep(SEARCH_DELAY_SEC)
             self._enrich_and_register_paper(
                 item["cand"], item["task"], registry, cutoff_date
             )
@@ -335,7 +341,7 @@ class HybridLiteratureAgent:
                 return
 
         try:
-            s2_data = s2_title_search(cand_title, cand_year, cutoff_date)
+            s2_data = paper_title_search(cand_title, cand_year, cutoff_date)
 
             if s2_data:
                 if not self._is_paper_allowed(s2_data, cutoff_date):
@@ -369,6 +375,7 @@ class HybridLiteratureAgent:
                     volume=j_info.get("volume"),
                     pages=j_info.get("pages"),
                     publication_date=s2_data.get("publicationDate"),
+                    bibcode=s2_data.get("bibcode"),
                 )
 
                 final_norm_title = self._normalize_title(full_obj.title)
@@ -549,6 +556,20 @@ class HybridLiteratureAgent:
                 suffix = chr(ord(suffix) + 1)
             p.citation_key = unique_key
             seen_keys.add(unique_key)
+
+        ads_entries = {}
+        if LIT_SEARCH_BACKEND == "ads":
+            try:
+                ads_entries = ads_export_bibtex([p.bibcode for p in papers if p.bibcode])
+            except Exception as e:
+                self._safe_print(f"   ⚠️ ADS BibTeX export failed, using generated entries: {e}")
+
+        for p in papers:
+            ads_entry = ads_entries.get(p.bibcode) if p.bibcode else None
+            if ads_entry:
+                # Keep ADS's entry but use our citation key.
+                entries.append(re.sub(r"^(@\w+\{)[^,]+,", lambda m: m.group(1) + p.citation_key + ",", ads_entry, count=1))
+                continue
 
             author_str = " and ".join(p.authors) if p.authors else "Unknown"
             entry_type = "article" if p.journal else "inproceedings"

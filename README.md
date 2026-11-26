@@ -40,6 +40,24 @@ Acting like an orchestrated team of specialized agents, it handles outline gener
     VERTEX_AI_LOCATION=your_vertex_ai_location
     GEMINI_API_KEY=your_gemini_api_key
 
+    # Optional: verify citations with NASA ADS / SciX instead of Semantic Scholar
+    # (recommended for astronomy). When ADS_API_TOKEN is set, ADS is used by default
+    # and references.bib uses ADS's BibTeX (AAS journal macros such as \apj).
+    ADS_API_TOKEN=your_ads_api_token
+    # LIT_SEARCH_BACKEND=ads   # or s2
+
+    # Optional: run all LLM calls through BizRouter (https://bizrouter.ai), an
+    # OpenAI-compatible gateway. When BIZROUTER_API_KEY is set it is used by default
+    # and no Gemini/Vertex/OpenAI keys are needed. Model names may be given as
+    # BizRouter ids (google/gemini-3.1-pro-preview, openai/gpt-5.5,
+    # anthropic/claude-opus-5.5, ...) or as plain Gemini names.
+    BIZROUTER_BASE_URL=https://api.bizrouter.ai/v1
+    BIZROUTER_API_KEY=your_bizrouter_api_key
+    # LLM_BACKEND=bizrouter    # or google
+    # BIZROUTER_SEARCH_MODEL=google/gemini-3.1-pro-preview:search   # model for literature search
+    # Notes: PDFs are sent as page images + extracted text (BizRouter does not accept
+    # PDF input for Gemini); Google Search grounding is replaced by BizRouter Search.
+
     # if you want to run demo and send emails to yourself at the end, set these 2 fields as well
     SMTP_EMAIL=your_email
     SMTP_PASSWORD=your_password
@@ -75,6 +93,21 @@ python paper_writing_cli.py \
 *   `--use_plotting`: Enable the plotting agent workflow to generate figures from code (Default: `False`).
 *   `--writer_model_name`: LLM for writer and literature agents.
 *   `--reflection_model_name`: LLM for reflection agents.
+
+### Step-by-step runner (review between steps)
+`run_steps.py` runs the same agents one step at a time in a work directory, so each step's output can be
+reviewed and edited before the next step uses it. Reruns back up overwritten files to `<workdir>/history/`.
+```bash
+python run_steps.py init --workdir work/paper1 --materials my_materials --template templates/aastex7 --cutoff 2026-11
+python run_steps.py outline    --workdir work/paper1   # -> outline.json
+python run_steps.py literature --workdir work/paper1   # -> references.bib, Intro + Related Work
+python run_steps.py add-figure --workdir work/paper1 --file fig1.pdf --caption "..."   # your own figures
+python run_steps.py plotting   --workdir work/paper1   # optional: generated figures
+python run_steps.py write      --workdir work/paper1   # -> latex_writeup/raw_draft_paper.tex/.pdf
+python run_steps.py refine     --workdir work/paper1 --rounds 1   # -> refine/round_N/
+python run_steps.py status     --workdir work/paper1
+```
+`templates/aastex7` is an AAS journals (AASTeX v7.0.1) template with astronomy-specific writing guidelines.
 
 ### Interactive Demo
 

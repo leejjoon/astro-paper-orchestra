@@ -26,6 +26,8 @@ import threading
 
 import dotenv
 
+from utils import bizrouter_utils
+
 dot_file = os.path.join(os.path.dirname(__file__), "../.env")
 dotenv.load_dotenv(dot_file)
 
@@ -41,6 +43,8 @@ def get_genai_client() -> genai.Client:
     them). Vertex AI takes precedence over GEMINI_API_KEY when both are set.
     """
     global _genai_client
+    if bizrouter_utils.USE_BIZROUTER:
+        return None
     if _genai_client is None:
         with _genai_client_lock:
             if _genai_client is None:
@@ -174,16 +178,25 @@ def call_gemini_with_contents(
     genai_client = get_genai_client()
     for attempt in range(max_retries):
         try:
-            response = genai_client.models.generate_content(
-                model=model_name,
-                contents=contents,
-                config=types.GenerateContentConfig(**generation_configs),
-            )
+            if bizrouter_utils.USE_BIZROUTER:
+                raw_response = bizrouter_utils.generate_text(
+                    contents, model_name, generation_configs
+                )
+            else:
+                response = genai_client.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=types.GenerateContentConfig(**generation_configs),
+                )
 
-            if not response or not hasattr(response, "text") or response.text is None:
-                raise ValueError("Incomplete response from Gemini API or empty text")
+                if (
+                    not response
+                    or not hasattr(response, "text")
+                    or response.text is None
+                ):
+                    raise ValueError("Incomplete response from Gemini API or empty text")
 
-            raw_response = response.text
+                raw_response = response.text
             parsed_response = result_parsing_func(raw_response)
 
             if check_parsed_response_not_none:
@@ -207,6 +220,9 @@ def call_gemini_with_contents(
                 or "400 bad request" in error_msg.lower()
                 or "code: 400" in error_msg.lower()
                 or "400 invalid_argument" in error_msg.lower()
+                or "error code: 400" in error_msg.lower()
+                or "error code: 422" in error_msg.lower()
+                or "is not offered by bizrouter" in error_msg.lower()
             ):
                 print("Detected input token count exceed. Not retrying.")
                 raise e
@@ -294,6 +310,30 @@ def generate_image_with_gemini(
 
     genai_client = get_genai_client()
     for attempt in range(max_retries):
+        if bizrouter_utils.USE_BIZROUTER:
+            try:
+                img_bytes = bizrouter_utils.generate_image(
+                    model_name,
+                    prompt,
+                    aspect_ratio=aspect_ratio,
+                    system_instruction=generation_configs.get("system_instruction"),
+                )
+                if img_bytes:
+                    if save_path:
+                        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+                        with open(save_path, "wb") as fh:
+                            fh.write(img_bytes)
+                    return base64.b64encode(img_bytes).decode("utf-8")
+                raise ValueError("No image returned")
+            except Exception as e:
+                print(f"Warning: BizRouter image generation failed {e}.")
+                if attempt + 1 == max_retries:
+                    print(f"Error: All {max_retries} retry attempts failed for image generation.")
+                    break
+                delay = base_interval_sec * (2 ** (attempt - 1)) if attempt > 0 else 0
+                if delay > 0:
+                    time.sleep(delay)
+                continue
         try:
             config_args = {
                 "temperature": 0.7,

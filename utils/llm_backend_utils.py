@@ -30,6 +30,19 @@ from utils.openai_utils import (
     get_openai_image_part_from_path,
 )
 from utils.pdf_utils import load_paper
+from utils import bizrouter_utils
+
+
+def _use_openai_sdk(model_name: str) -> bool:
+    """True when the call should go through the native OpenAI SDK path.
+
+    With BizRouter enabled every model (Gemini, GPT, Claude, ...) goes through
+    the Gemini-style path, which is served by the BizRouter adapter.
+    """
+    if bizrouter_utils.USE_BIZROUTER:
+        return False
+    name = model_name.lower()
+    return "gpt" in name or "o1" in name or "o3" in name
 
 
 def identity_parse(response: str):
@@ -40,11 +53,7 @@ def get_llm_parser(model_name: str, return_json: bool = True) -> Callable:
     if not return_json:
         return identity_parse
 
-    if (
-        "gpt" in model_name.lower()
-        or "o1" in model_name.lower()
-        or "o3" in model_name.lower()
-    ):
+    if _use_openai_sdk(model_name):
         return parse_openai_json_results
     else:
         return parse_gemini_json_results
@@ -70,11 +79,7 @@ def call_llm_with_text_prompt(
     if generation_configs is None:
         generation_configs = {}
 
-    if (
-        "gpt" in model_name.lower()
-        or "o1" in model_name.lower()
-        or "o3" in model_name.lower()
-    ):
+    if _use_openai_sdk(model_name):
         system_prompt = None
         configs_for_openai = dict(generation_configs) if generation_configs else {}
         if "system_instruction" in configs_for_openai:
@@ -123,11 +128,7 @@ def call_llm_with_images(
     if generation_configs is None:
         generation_configs = {}
 
-    if (
-        "gpt" in model_name.lower()
-        or "o1" in model_name.lower()
-        or "o3" in model_name.lower()
-    ):
+    if _use_openai_sdk(model_name):
         system_prompt = None
         # Copy to avoid side-effects on caller's dictionary
         configs_for_openai = dict(generation_configs) if generation_configs else {}
@@ -181,11 +182,7 @@ def call_llm_with_pdf(
         else get_llm_parser(model_name, return_json)
     )
 
-    if (
-        "gpt" in model_name.lower()
-        or "o1" in model_name.lower()
-        or "o3" in model_name.lower()
-    ):
+    if _use_openai_sdk(model_name):
         paper_text = load_paper(pdf_path, min_size=100)
         full_prompt = f"Paper Content:\n{paper_text}\n\nTask:\n{prompt}"
 
