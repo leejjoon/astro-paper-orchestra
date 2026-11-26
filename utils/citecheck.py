@@ -156,8 +156,9 @@ def bib_bibcodes(bib_text: str) -> Dict[str, Optional[str]]:
 
 # --- the corpus ----------------------------------------------------------------------------
 
-def _norm(s: str) -> str:
-    s = html.unescape(re.sub(r"<[^>]+>", " ", s or ""))  # tags as spaces: table cells stay separate words
+def _norm(s: str, tag: str = "") -> str:
+    """tag="" joins inline markup (H<sub>2</sub>O -> h2o); tag=" " keeps table cells apart."""
+    s = html.unescape(re.sub(r"<[^>]+>", tag, s or ""))
     s = unicodedata.normalize("NFKC", s)
     s = s.replace("\u2212", "-").replace("\u2013", "-").replace("\u2014", "-")
     s = re.sub(r"[*_`]", "", s)
@@ -252,13 +253,14 @@ def check_quote(corpus: Corpus, doc_id: str, node_id: str, quote: str) -> Tuple[
                             (doc_id, node_id)).fetchone()
     if row is None:
         return False, "node does not exist"
-    q = _norm(quote)
-    if len(q.split()) < MIN_QUOTE_WORDS:
+    variants = [(_norm(quote, tag), tag) for tag in ("", " ")]
+    if all(len(q.split()) < MIN_QUOTE_WORDS for q, _ in variants):
         return False, f"quote shorter than {MIN_QUOTE_WORDS} words"
-    if q in _norm(row[0]):
+    variants = [(q, tag) for q, tag in variants if len(q.split()) >= MIN_QUOTE_WORDS]
+    if any(q in _norm(row[0], tag) for q, tag in variants):
         return True, ""
     for (nid, text) in corpus.db.execute("SELECT node_id, text FROM nodes WHERE doc_id=?", (doc_id,)):
-        if q in _norm(text):
+        if any(q in _norm(text, tag) for q, tag in variants):
             return False, f"quote found in node {nid}, not {node_id}"
     return False, "quote not found in the paper"
 
@@ -465,7 +467,11 @@ def _reverify(corpus: Corpus, doc_id: str, res: Dict) -> Optional[Dict]:
         if e.get("quote_ok") and not ok:
             return None
         evidence.append({**e, "quote_ok": ok, "problem": why})
-    return {**res, "evidence": evidence}
+    out = {**res, "evidence": evidence}
+    mv = res.get("model_verdict", res.get("verdict"))
+    if mv in ("supported", "partially_supported", "names_only"):  # same rule as _verify
+        out["verdict"] = mv if evidence and all(e["quote_ok"] for e in evidence) else "quote_not_found"
+    return out
 
 
 def _verify(corpus: Corpus, doc_id: str, r: Dict) -> Dict:

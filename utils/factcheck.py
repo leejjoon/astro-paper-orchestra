@@ -130,9 +130,10 @@ def figure_pdf_text(figures_dir: str) -> str:
 
 
 def figure_captions(figures_info_path: str) -> str:
+    """Captions plus each figure's optional 'verification' field (values for checking only)."""
     try:
         with open(figures_info_path) as f:
-            return "\n".join(x.get("caption", "") for x in json.load(f))
+            return "\n".join(x.get("caption", "") + "\n" + x.get("verification", "") for x in json.load(f))
     except (OSError, ValueError):
         return ""
 

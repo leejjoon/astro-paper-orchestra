@@ -349,7 +349,10 @@ def cmd_add_figure(args):
     name = args.name or osp.basename(args.file)
     shutil.copy(args.file, osp.join(work.figures, name))
     info = [f for f in load_figures_info(work) if f["name"] != name]
-    info.append({"name": name, "caption": args.caption, "source": "user"})
+    entry = {"name": name, "caption": args.caption, "source": "user"}
+    if args.verification:
+        entry["verification"] = args.verification  # read by factcheck only, never by the writer
+    info.append(entry)
     save_figures_info(work, info)
     print(f"Added figures/{name}. Registered figures:")
     for f in info:
@@ -466,7 +469,7 @@ def cmd_factcheck(args):
         require(path, "Source file not found.")
         with open(path, encoding="utf-8", errors="replace") as f:
             sources[path] = f.read()
-    sources["figure captions (figures/info.json)"] = figure_captions(work.figures_info)
+    sources["figure captions and verification notes (figures/info.json)"] = figure_captions(work.figures_info)
     sources["text inside the figure PDFs"] = figure_pdf_text(work.figures)
     with open(tex_path, encoding="utf-8") as f:
         tex = f.read()
@@ -663,6 +666,8 @@ def main():
     sp.add_argument("--file", required=True)
     sp.add_argument("--caption", required=True)
     sp.add_argument("--name", help="File name inside figures/ (default: original name).")
+    sp.add_argument("--verification", help="Values read from the figure (zoom ranges, ...) for factcheck "
+                                           "only; the writer never sees this field.")
 
     sp = add("remove-figure", cmd_remove_figure, "Unregister a figure.", model=False)
     sp.add_argument("--name", required=True)
