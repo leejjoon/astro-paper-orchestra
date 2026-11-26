@@ -240,6 +240,16 @@ def ads_title_search(
         return None
 
 
+def ads_bibcode_lookup(bibcodes: List[str]) -> Dict[str, Dict]:
+    """Fetch papers by ADS bibcode. Returns {bibcode: paper dict} for those found."""
+    out = {}
+    for bib in dict.fromkeys(b.strip() for b in bibcodes if b.strip()):
+        docs = _ads_query(f'identifier:"{bib}"', rows=1)
+        if docs:
+            out[bib] = _ads_doc_to_paper(docs[0])
+    return out
+
+
 def ads_export_bibtex(bibcodes: List[str]) -> Dict[str, str]:
     """Fetch ADS BibTeX entries. Returns {bibcode: bibtex_entry}."""
     bibcodes = [b for b in dict.fromkeys(bibcodes) if b]

@@ -28,6 +28,7 @@ from methods.prompts.literature_review_agent import (
 from utils.gemini_utils import call_gemini_with_contents, parse_gemini_latex_results
 from utils.scholar_utils import (
     paper_title_search,
+    ads_bibcode_lookup,
     ads_export_bibtex,
     LIT_SEARCH_BACKEND,
     SEARCH_DELAY_SEC,
@@ -60,6 +61,15 @@ class PaperData(BaseModel):
     pages: Optional[str] = None
     publication_date: Optional[str] = None
     bibcode: Optional[str] = None
+    # Must-cite papers given by the authors: "intro" ones go to the Introduction /
+    # Related Work writer, "body" ones only to the citation map for later sections.
+    seed_section: Optional[str] = None
+    raw_bibtex: Optional[str] = None
+
+
+def _bib_field(entry: str, name: str) -> str:
+    m = re.search(name + r"\s*=\s*[{\"](.*?)[}\"]\s*,?\s*\n", entry, re.S | re.I)
+    return re.sub(r"[{}]", "", m.group(1)).strip() if m else ""
 
 
 class WriterOutput(BaseModel):
@@ -77,7 +87,11 @@ class HybridLiteratureAgent:
         output_dir: str,
         model_name: str = "gemini-3.1-pro-preview",
         max_workers: int = 5,
+        must_cite_path: Optional[str] = None,
+        must_cite_bib_path: Optional[str] = None,
     ):
+        self.must_cite_path = must_cite_path
+        self.must_cite_bib_path = must_cite_bib_path
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
@@ -119,6 +133,8 @@ class HybridLiteratureAgent:
         unique_papers_registry: Dict[str, PaperData] = {}
         processed_tasks = set()
 
+        self._register_must_cite(unique_papers_registry)
+
         # --- PHASE 1: DISCOVERY & RETRIEVAL ---
         self._safe_print(f"📚 Phase 1: Analyzing Plan & Executing Search Tasks...")
 
@@ -148,7 +164,9 @@ class HybridLiteratureAgent:
         # --- PHASE 3: WRITING ---
         self._safe_print("✍️  Phase 3: Writing Introduction & Related Work...")
         latex_content = self._synthesize_content(
-            updated_outline, final_papers_list, cutoff_date
+            updated_outline,
+            [p for p in final_papers_list if p.seed_section != "body"],
+            cutoff_date,
         )
 
         # --- PHASE 4: SAVING ---
@@ -162,6 +180,79 @@ class HybridLiteratureAgent:
         self._safe_print(
             f"✅ Done! Literature Review Outputs saved to {self.output_dir}/"
         )
+
+    def _register_must_cite(self, registry: Dict[str, "PaperData"]):
+        """Add the authors' must-cite papers before any search.
+
+        must_cite.txt: one `bibcode | intro|body | note` per line (# comments).
+        must_cite.bib: raw BibTeX for references ADS does not have; their keys are
+        kept and they are treated as "body" references unless the entry has a
+        `keywords = {intro}` field.
+        """
+        seeds = []
+        if self.must_cite_path and os.path.exists(self.must_cite_path):
+            with open(self.must_cite_path) as f:
+                for line in f:
+                    line = line.split("#", 1)[0].strip()
+                    if not line:
+                        continue
+                    parts = [x.strip() for x in line.split("|")]
+                    where = parts[1] if len(parts) > 1 and parts[1] in ("intro", "body") else "intro"
+                    note = parts[2] if len(parts) > 2 else ""
+                    seeds.append((parts[0], where, note))
+        if seeds:
+            if LIT_SEARCH_BACKEND != "ads":
+                raise ValueError("must_cite.txt lists ADS bibcodes; set LIT_SEARCH_BACKEND=ads.")
+            found = ads_bibcode_lookup([b for b, _, _ in seeds])
+            for bib, where, note in seeds:
+                d = found.get(bib)
+                if not d:
+                    self._safe_print(f"   ⚠️ must-cite bibcode not found on ADS: {bib}")
+                    continue
+                paper = PaperData(
+                    citation_key=self._generate_key(d.get("authors", []), d.get("year"), d["title"]),
+                    title=d["title"],
+                    authors=[a["name"] for a in d.get("authors", [])],
+                    venue=d.get("venue") or "",
+                    year=d.get("year") or 0,
+                    abstract=(d.get("abstract") or "")[:1500],
+                    citation_count=d.get("citationCount") or 0,
+                    found_in_section="must_cite",
+                    reason=note or "Required by the authors.",
+                    journal=(d.get("journal") or {}).get("name"),
+                    volume=(d.get("journal") or {}).get("volume"),
+                    pages=(d.get("journal") or {}).get("pages"),
+                    publication_date=d.get("publicationDate"),
+                    bibcode=d.get("bibcode"),
+                    seed_section=where,
+                )
+                registry[self._normalize_title(paper.title)] = paper
+        n_bib = 0
+        if self.must_cite_bib_path and os.path.exists(self.must_cite_bib_path):
+            with open(self.must_cite_bib_path) as f:
+                text = f.read()
+            for entry in re.split(r"\n(?=@)", "\n" + text):
+                m = re.match(r"\s*@\w+\{([^,]+),", entry)
+                if not m:
+                    continue
+                title = _bib_field(entry, "title")
+                paper = PaperData(
+                    citation_key=m.group(1).strip(),
+                    title=title,
+                    authors=[a.strip() for a in _bib_field(entry, "author").split(" and ") if a.strip()],
+                    venue=_bib_field(entry, "journal") or _bib_field(entry, "publisher") or "",
+                    year=int(re.sub(r"\D", "", _bib_field(entry, "year")) or 0),
+                    abstract=_bib_field(entry, "abstract"),
+                    citation_count=0,
+                    found_in_section="must_cite",
+                    reason=_bib_field(entry, "note") or "Required by the authors.",
+                    seed_section="intro" if "intro" in _bib_field(entry, "keywords") else "body",
+                    raw_bibtex=entry.strip(),
+                )
+                registry[self._normalize_title(title)] = paper
+                n_bib += 1
+        if seeds or n_bib:
+            self._safe_print(f"   📌 Must-cite papers registered: {len(registry)} ({n_bib} from .bib)")
 
     def _execute_tasks_in_parallel(
         self, tasks, outline, registry, processed_tasks_set, cutoff_date
@@ -565,6 +656,9 @@ class HybridLiteratureAgent:
                 self._safe_print(f"   ⚠️ ADS BibTeX export failed, using generated entries: {e}")
 
         for p in papers:
+            if p.raw_bibtex:
+                entries.append(p.raw_bibtex)
+                continue
             ads_entry = ads_entries.get(p.bibcode) if p.bibcode else None
             if ads_entry:
                 # Keep ADS's entry but use our citation key.
@@ -597,9 +691,10 @@ class HybridLiteratureAgent:
                 "venue": p.venue,
                 "year": p.year,
                 "abstract": p.abstract.strip(),
+                **({"authors_note": p.reason} if p.seed_section else {}),
             }
             for p in papers
-            if p.abstract
+            if p.abstract or p.seed_section
         }
 
     def _save_outputs(self, latex, bibtex, citation_map, outline, outline_path):
