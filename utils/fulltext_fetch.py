@@ -82,7 +82,7 @@ def _try_epub(session, doi: str, landing_html: str, landing_url: str, out: str) 
 
 
 def _try_pdf(session, bibcode: str, landing_html: str, landing_url: str, out: str) -> Optional[str]:
-    candidates = [GATEWAY.format(bibcode=bibcode)]
+    candidates = [] if bibcode.startswith("doi-") else [GATEWAY.format(bibcode=bibcode)]
     m = re.search(r'<meta[^>]+name="citation_pdf_url"[^>]+content="([^"]+)"', landing_html or "")
     if m:
         candidates.append(urljoin(landing_url, m.group(1)))
@@ -127,7 +127,11 @@ def fetch_all(papers: List[Dict], sources_dir: str, retry_failed: bool = False) 
             continue
         rec = {"key": p.get("key"), "doi": doi, "tried": datetime.now(timezone.utc).isoformat(timespec="seconds")}
         if not doi:
-            rec.update(status="failed", reason="no DOI (not a journal article?)")
+            rec.update(status="failed", reason="no DOI (book, atlas or not a journal article?)")
+            manifest[bib] = rec
+            continue
+        if doi.startswith("10.48550/"):
+            rec.update(status="failed", reason="arXiv-only record (publisher versions only)")
             manifest[bib] = rec
             continue
         landing = _get(session, f"https://doi.org/{doi}")
@@ -166,8 +170,11 @@ def cited_papers(tex: str, bib_text: str) -> List[Dict]:
     out = []
     for k in sorted(keys):
         e = entries.get(k, "")
-        doi = re.search(r"\bdoi\s*=\s*[{\"]([^}\"]+)", e, re.I)
+        doi_field = re.search(r"\bdoi\s*=\s*[{\"]([^}\"]+)", e, re.I)
+        dois = re.findall(r"10\.\d{4,9}/.+?(?=\s*,|\s|10\.\d{4,9}/|$)", doi_field.group(1)) if doi_field else []
         ads = re.search(r"adsurl\s*=\s*[{\"][^}\"]*/abs/([^}\"/]+)", e, re.I)
-        out.append({"key": k, "bibcode": ads.group(1).replace("%26", "&") if ads else None,
-                    "doi": doi.group(1) if doi else None})
+        bibcode = ads.group(1).replace("%26", "&") if ads else (
+            "doi-" + dois[0].replace("/", "_") if dois else None)  # no ADS record: DOI-based id
+        out.append({"key": k, "bibcode": bibcode,
+                    "doi": dois[0] if dois else None})
     return out

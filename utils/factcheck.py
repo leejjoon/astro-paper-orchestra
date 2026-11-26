@@ -9,6 +9,7 @@ commands are skipped.
 """
 
 import json
+import os
 import re
 from typing import Dict, Iterable, List, Set, Tuple
 
@@ -111,6 +112,21 @@ def artifact_check(tex: str) -> List[Dict]:
                              "context": re.sub(r"\s+", " ", text[max(0, m.start() - 60): m.end() + 40]).strip()})
                 break
     return hits
+
+
+def figure_pdf_text(figures_dir: str) -> str:
+    """Text inside the figure PDFs (axis labels, annotations), via pdftotext if installed.
+    The writer sees the figures, so numbers it reads off them count as sourced."""
+    import glob
+    import shutil
+    import subprocess
+    if not shutil.which("pdftotext"):
+        return ""
+    out = []
+    for path in sorted(glob.glob(os.path.join(figures_dir, "*.pdf"))):
+        r = subprocess.run(["pdftotext", "-q", path, "-"], capture_output=True, text=True)
+        out.append(r.stdout)
+    return "\n".join(out)
 
 
 def figure_captions(figures_info_path: str) -> str:

@@ -107,6 +107,31 @@ python run_steps.py write      --workdir work/paper1   # -> latex_writeup/raw_dr
 python run_steps.py refine     --workdir work/paper1 --rounds 1   # -> refine/round_N/
 python run_steps.py status     --workdir work/paper1
 ```
+#### Checking the draft against its sources
+```bash
+python run_steps.py factcheck --workdir work/paper1          # numbers in the draft vs. materials, figure text
+python run_steps.py citecheck --workdir work/paper1 --mode full [--propose-fixes]
+python run_steps.py citefix   --workdir work/paper1 --apply <id> ...
+```
+`citecheck` reads every cited paper's full text, never an abstract or the model's memory. Papers
+come from a [papertrail](https://github.com/leejjoon/papertrail) corpus (`refs_corpus` and
+`papertrail_python` in `<workdir>/config.json`). Publisher EPUB/PDF files are fetched directly
+when the publisher allows it; papers it can't fetch are listed for you to download by hand.
+- Each citation gets a verdict (supported, names_only, partially_supported, not_supported,
+  quote_not_found, no_fulltext, author_checked) with verbatim quotes. A script checks each quote
+  against the paper's text.
+- Verdicts are cached per sentence and re-verified against the current index. `--fresh` re-reads
+  everything; `--report-only` rewrites the report from the last JSON.
+- The report (`<draft>_citecheck.md`) ends with a "Supporting evidence" section. For each
+  citation it gives the draft sentence and every quote with its section, paragraph id and page
+  in the cited paper.
+- Verdicts are also stored as papertrail answers, so the quotes are clickable in its reader.
+- `--propose-fixes` drafts a minimal edit for each flagged citation and re-checks it with a full
+  read. `citefix --apply` applies the ones you choose. Unapplied proposals survive later runs.
+- Papers with no full text that the authors vouch for go in
+  `<workdir>/citecheck_author_checked.json` (`{key: note}`).
+- `--mode routed` (summary-guided excerpts) is experimental.
+
 `templates/aastex7` is an AAS journals (AASTeX v7.0.1) template with astronomy-specific writing guidelines. `templates/openjournal` is the same for The Open Journal of Astrophysics (`openjournal.cls`, with `aasjournalmacros.sty` so ADS BibTeX journal macros resolve, and `aasjournal.bst`).
 
 ### Interactive Demo

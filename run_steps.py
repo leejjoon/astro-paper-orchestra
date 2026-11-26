@@ -20,6 +20,7 @@ Steps (run in this order; `plotting` and `add-figure` are optional):
     refine      -> refine/round_N/ (reviewer feedback, revised .tex and .pdf)
     factcheck   list numbers in a draft that are not in the materials
     citecheck   check every citation against the cited paper's full text (papertrail corpus)
+    citefix     apply proposed citation fixes by id
     status      show what has been done and where the files are
 
 Examples:
@@ -454,7 +455,7 @@ def latest_tex(work: Work) -> str:
 
 
 def cmd_factcheck(args):
-    from utils.factcheck import artifact_check, check, figure_captions, write_report
+    from utils.factcheck import artifact_check, check, figure_captions, figure_pdf_text, write_report
 
     work = Work(args.workdir)
     work.load_config()
@@ -466,6 +467,7 @@ def cmd_factcheck(args):
         with open(path, encoding="utf-8", errors="replace") as f:
             sources[path] = f.read()
     sources["figure captions (figures/info.json)"] = figure_captions(work.figures_info)
+    sources["text inside the figure PDFs"] = figure_pdf_text(work.figures)
     with open(tex_path, encoding="utf-8") as f:
         tex = f.read()
     findings = check(tex, sources)
@@ -483,45 +485,124 @@ def cmd_factcheck(args):
     print(f"Report: {out}")
 
 
-def cmd_citecheck(args):
-    from utils import citecheck
+def _citecheck_setup(args):
     from utils.llm_backend_utils import call_llm_with_text_prompt
 
     work = Work(args.workdir)
     cfg = work.load_config()
-    model = args.model or cfg.get("citecheck_model") or cfg["writer_model"]
+    model = getattr(args, "model", None) or cfg.get("citecheck_model") or cfg["writer_model"]
     tex_path = osp.abspath(args.tex) if args.tex else latest_tex(work)
     require(tex_path, "Nothing to check yet; run `write` first or pass --tex.")
     bib_path = osp.join(osp.dirname(tex_path), "references.bib")
     if not osp.exists(bib_path):
         bib_path = osp.join(work.lit_dir, "references.bib")
-    corpus_root = osp.abspath(args.corpus or cfg.get("refs_corpus") or "")
-    sqlite_path = osp.join(corpus_root, "data", "kb.sqlite")
-    require(sqlite_path, "No papertrail corpus index; pass --corpus or set refs_corpus in config.json.")
-    tex = open(tex_path, encoding="utf-8").read()
-    bib = open(bib_path, encoding="utf-8").read()
-    extra = json.load(open(args.extra_claims)) if args.extra_claims else None
+    corpus_root = osp.abspath(getattr(args, "corpus", None) or cfg.get("refs_corpus") or "")
+    require(osp.join(corpus_root, "data", "kb.sqlite"),
+            "No papertrail corpus index; pass --corpus or set refs_corpus in config.json.")
 
     def llm(prompt):
         r = call_llm_with_text_prompt(prompt, model, generation_configs={"temperature": 0.0},
                                       check_parsed_response_not_none=False)
         return r.get("parsed_response")
 
+    return work, cfg, model, tex_path, bib_path, corpus_root, llm
+
+
+def _author_checked(work):
+    """<workdir>/citecheck_author_checked.json: {citation key: note} for papers without a
+    full text that the authors vouch for (e.g. the original reference for a named method)."""
+    path = osp.join(work.root, "citecheck_author_checked.json")
+    return json.load(open(path)) if osp.exists(path) else {}
+
+
+def cmd_citecheck(args):
+    from utils import citecheck
+
+    work, cfg, model, tex_path, bib_path, corpus_root, llm = _citecheck_setup(args)
+    tex = open(tex_path, encoding="utf-8").read()
+    bib = open(bib_path, encoding="utf-8").read()
+    extra = json.load(open(args.extra_claims)) if args.extra_claims else None
+    cache = args.cache or osp.join(work.root, "citecheck_cache.json")
     stem = osp.splitext(tex_path)[0] + (f"_{args.label}" if args.label else "")
+    stats = citecheck.Stats()
+    if args.report_only:
+        prev = json.load(open(stem + "_citecheck.json"))
+        rows = prev["rows"]
+        citecheck.annotate_evidence(rows, citecheck.Corpus(corpus_root), tex)
+        st = prev.get("stats", {})
+        stats.calls, stats.prompt_chars, stats.seconds = (st.get("calls", stats.calls),
+                                                          st.get("prompt_chars", stats.prompt_chars),
+                                                          st.get("seconds", 0))
+        citecheck.write_report(rows, prev.get("published", {}), tex_path, stem + "_citecheck.md",
+                               stem + "_citecheck.json", prev.get("model", model),
+                               os.environ.get("WEBAPP_BASE_URL", "http://127.0.0.1:8000"),
+                               prev.get("mode", args.mode), stats, prev.get("fixes"))
+        print(f">> Report rewritten from {stem}_citecheck.json (no reads, nothing published).")
+        return
     t0 = time.time()
-    rows = citecheck.run(tex, bib, sqlite_path, model, osp.join(work.root, "citecheck_cache.json"),
-                         llm, keys=args.keys, extra_claims=extra)
+    rows = citecheck.run(tex, bib, corpus_root, model, cache, llm, mode=args.mode, keys=args.keys,
+                         extra_claims=extra, use_cache=not args.fresh, stats=stats,
+                         author_checked=_author_checked(work))
+    fixes = None
+    if args.propose_fixes:
+        def recheck(new_tex, probe):
+            return citecheck.run(new_tex, bib, corpus_root, model, cache, llm, mode="full",
+                                 sentence_filter=probe, stats=stats)
+        fixes = citecheck.propose_fixes(rows, tex, llm, recheck)
+    elif osp.exists(stem + "_citecheck.json"):
+        # keep earlier proposals that are still applicable (their 'old' text is still in the draft once)
+        prev = json.load(open(stem + "_citecheck.json")).get("fixes") or []
+        fixes = [f for f in prev if f.get("old") and tex.count(f["old"]) == 1] or None
     published = {}
+    pt_python = args.papertrail_python or cfg.get("papertrail_python")
+    helper = osp.join(REPO_DIR, "utils", "papertrail_publish.py")
     if not args.no_publish:
-        published = citecheck.publish(
-            citecheck.answer_payloads(rows), corpus_root,
-            args.papertrail_python or cfg.get("papertrail_python"),
-            osp.join(REPO_DIR, "utils", "papertrail_publish.py"), stem + "_citecheck_payloads.json")
+        published = citecheck.publish(citecheck.answer_payloads(rows), corpus_root, pt_python, helper,
+                                      stem + "_citecheck_payloads.json")
+        corpus = citecheck.Corpus(corpus_root)
+        summaries = {}
+        for d in {r["doc_id"] for r in rows if r.get("doc_id") and r["verdict"] != "no_fulltext"}:
+            marker = osp.join(corpus.summary_dir, f"{d}.published")
+            if corpus.summary(d) and not osp.exists(marker):
+                summaries[d] = citecheck.summary_payload(corpus, d)
+        if summaries:
+            done = citecheck.publish(summaries, corpus_root, pt_python, helper,
+                                     stem + "_summary_payloads.json", "Summary")
+            for d, v in done.items():
+                with open(osp.join(corpus.summary_dir, f"{d}.published"), "w") as f:
+                    f.write(v["id"] + "\n")
+    citecheck.annotate_evidence(rows, citecheck.Corpus(corpus_root), tex)
     counts = citecheck.write_report(rows, published, tex_path, stem + "_citecheck.md",
                                     stem + "_citecheck.json", model,
-                                    os.environ.get("WEBAPP_BASE_URL", "http://127.0.0.1:8000"))
+                                    os.environ.get("WEBAPP_BASE_URL", "http://127.0.0.1:8000"),
+                                    args.mode, stats, fixes)
     print("   " + ", ".join(f"{k}: {v}" for k, v in counts.items() if v))
+    print(f"   model calls: {stats.calls}; prompt characters: {stats.prompt_chars}")
+    if fixes:
+        print(f"   proposed fixes: {sum(f['status'] == 'passes' for f in fixes)} pass, "
+              f"{sum(f['status'] != 'passes' for f in fixes)} do not")
     report(t0, [stem + "_citecheck.md", stem + "_citecheck.json"])
+
+
+def cmd_citefix(args):
+    from utils import citecheck
+
+    work = Work(args.workdir)
+    work.load_config()
+    tex_path = osp.abspath(args.tex) if args.tex else latest_tex(work)
+    report_json = args.report or osp.splitext(tex_path)[0] + "_citecheck.json"
+    require(report_json, "No citecheck report; run `citecheck --propose-fixes` first.")
+    fixes = json.load(open(report_json)).get("fixes") or []
+    tex = open(tex_path, encoding="utf-8").read()
+    new_tex, done = citecheck.apply_fixes(tex, fixes, args.apply)
+    backup(work, "citefix", [tex_path])
+    with open(tex_path, "w", encoding="utf-8") as f:
+        f.write(new_tex)
+    for f in fixes:
+        if f["id"] in done:
+            print(f"   applied {f['id']} (line {f['line']}, {f['key']}): {f['new'][:100]}")
+    print("Re-run citecheck: the edited sentences were already checked when the fixes were "
+          "proposed, so they come from the cache.")
 
 
 def cmd_status(args):
@@ -604,6 +685,20 @@ def main():
     sp.add_argument("--extra-claims", help="JSON list of extra claims (controls) to check.")
     sp.add_argument("--label", help="Suffix for the report file names.")
     sp.add_argument("--no-publish", action="store_true", help="Do not store answers in papertrail.")
+    sp.add_argument("--report-only", action="store_true",
+                    help="Rewrite the report from the last <stem>_citecheck.json without reading papers.")
+    sp.add_argument("--mode", choices=("auto", "full", "routed"), default="auto",
+                    help="full: read whole papers; routed: summary-guided excerpts, escalating "
+                         "anything not supported to a full read; auto: routed where a summary exists.")
+    sp.add_argument("--fresh", action="store_true", help="Ignore cached verdicts (still updates the cache).")
+    sp.add_argument("--cache", help="Cache file (default: <workdir>/citecheck_cache.json).")
+    sp.add_argument("--propose-fixes", action="store_true",
+                    help="Propose a minimal edit for each flagged citation, re-checked with a full read.")
+
+    sp = add("citefix", cmd_citefix, "Apply proposed citation fixes by id.", model=False)
+    sp.add_argument("--tex", help="Draft to edit (default: latest refined, else raw draft).")
+    sp.add_argument("--report", help="citecheck JSON report with the proposals.")
+    sp.add_argument("--apply", nargs="+", required=True, help="Fix ids to apply.")
 
     add("status", cmd_status, "Show progress.", model=False)
 

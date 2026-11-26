@@ -15,7 +15,7 @@ from papertrail.core.registry import CorpusRegistry
 from papertrail.core.store import Store
 
 
-def main(corpus_root: str, payload_path: str) -> None:
+def main(corpus_root: str, payload_path: str, title_prefix: str = "Citation check") -> None:
     settings = load_settings(corpus_root)
     registry = CorpusRegistry(settings)
     store = Store(settings)
@@ -23,11 +23,11 @@ def main(corpus_root: str, payload_path: str) -> None:
     out = {}
     for doc_id, payload in payloads.items():
         enriched = validate_and_enrich(payload, registry.docs, registry.style, strict=True)
-        title = f"Citation check: {doc_id}"
+        title = f"{title_prefix}: {doc_id}"
         answer_id = store.create_answer("agent_adhoc", enriched, title=title)
         out[doc_id] = {"id": answer_id, "warnings": enriched.get("warnings", [])}
     print(json.dumps(out))
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(*sys.argv[1:4])
