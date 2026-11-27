@@ -157,7 +157,10 @@ def bib_bibcodes(bib_text: str) -> Dict[str, Optional[str]]:
 # --- the corpus ----------------------------------------------------------------------------
 
 def _norm(s: str, tag: str = "") -> str:
-    """tag="" joins inline markup (H<sub>2</sub>O -> h2o); tag=" " keeps table cells apart."""
+    """tag="" joins inline markup (H<sub>2</sub>O -> h2o); tag=" " keeps table cells apart;
+    tag="fn" also drops footnote markers (unsupervised<sup>1</sup> deep -> unsupervised deep)."""
+    if tag == "fn":
+        s, tag = re.sub(r"<sup>[\s\d,*\u2020\u2021\u00a7]+</sup>", "", s or ""), ""
     s = html.unescape(re.sub(r"<[^>]+>", tag, s or ""))
     s = unicodedata.normalize("NFKC", s)
     s = s.replace("\u2212", "-").replace("\u2013", "-").replace("\u2014", "-")
@@ -253,7 +256,7 @@ def check_quote(corpus: Corpus, doc_id: str, node_id: str, quote: str) -> Tuple[
                             (doc_id, node_id)).fetchone()
     if row is None:
         return False, "node does not exist"
-    variants = [(_norm(quote, tag), tag) for tag in ("", " ")]
+    variants = [(_norm(quote, tag), tag) for tag in ("", " ", "fn")]
     if all(len(q.split()) < MIN_QUOTE_WORDS for q, _ in variants):
         return False, f"quote shorter than {MIN_QUOTE_WORDS} words"
     variants = [(q, tag) for q, tag in variants if len(q.split()) >= MIN_QUOTE_WORDS]
