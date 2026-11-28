@@ -21,8 +21,9 @@ built on REVTeX 4.1).
 ## General Setup
 * **Document class:** `\documentclass[onecolumn]{openjournal}`. Do not change the class
   options.
-* **Packages:** The class loads `natbib` (author-year), `graphicx`, `amssymb` and `longtable`
-  and provides `deluxetable`. The template preamble adds `amsmath`, `hyperref` and
+* **Packages:** The class loads `natbib` (author-year), `graphicx`, `amssymb` and `longtable`.
+  It also provides `deluxetable`, but do not use it: under `openjournal.cls` its rules are
+  drawn through the table rows. The template preamble adds `amsmath`, `hyperref` and
   `aasjournalmacros` (the journal-name macros `\apj`, `\aj`, `\mnras`, `\aap`, `\pasp`,
   `\jqsrt`, ... that the bibliography uses). Do not load these again and do not change the
   preamble. Do not add packages that are not installed in a standard TeX Live distribution.
@@ -84,8 +85,10 @@ built on REVTeX 4.1).
   `Table~\ref{tab:x}`) before or near where it appears.
 * Captions are complete sentences that explain what is shown, including the meaning of
   colors, symbols, line styles and units, so the figure can be understood on its own.
-* Tables: `deluxetable` (provided by the class) is preferred, but a standard `table` with `tabular` is
-  acceptable. Caption goes **above** the table. Give units in column headers.
+* Tables: use a standard `table` with `tabular` (not `deluxetable`, whose rules are misdrawn
+  under `openjournal.cls`). Use `\hline\hline` above the header and `\hline` below it and at
+  the end. For long text cells, use `p{...\linewidth}` columns. Caption goes **above** the
+  table. Give units in column headers.
 
 ### Example figure
 ```latex
@@ -100,14 +103,19 @@ The lower panel shows the residuals.}
 
 ### Example table
 ```latex
-\begin{deluxetable}{lcc}
-\tablecaption{Summary of observations. \label{tab:obs}}
-\tablehead{\colhead{Target} & \colhead{Date} & \colhead{Exposure (s)}}
-\startdata
+\begin{table}
+\centering
+\caption{Summary of observations.}
+\label{tab:obs}
+\begin{tabular}{lcc}
+\hline\hline
+Target & Date & Exposure (s) \\
+\hline
 HD 12345 & 2024-01-02 & 600 \\
 HD 67890 & 2024-01-03 & 900 \\
-\enddata
-\end{deluxetable}
+\hline
+\end{tabular}
+\end{table}
 ```
 
 ## Journal policy (The Open Journal of Astrophysics, "For Authors")
