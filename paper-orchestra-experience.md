@@ -618,20 +618,21 @@ Each was a procedure we performed more than once. Each spec gives a trigger, inp
 
 ## 13. Open items at the end of the session
 
+Done after the first draft of this document: the per-gas layer-state option is committed in tellurix
+(and mentioned in the paper as an option); `latex_writeup/references.bib` is synced with refine round 1;
+the OJAp guidelines use `tabular`, and the template clears the page before the bibliography (which
+removed the overfull vbox in the paper); the HITRAN2024 entry is the published JQSRT 353, 109807.
+
 - **Paper:**
-  - Zenodo DOIs;
-  - HITRAN2024 citation, to be confirmed;
+  - Zenodo DOIs (after archiving);
   - Wallace 2011 line widths: keep out, or state;
-  - the AFGL report, to be read under the reading rule;
-  - an overfull vbox where the bibliography starts.
+  - the AFGL report, to be read under the reading rule: DTIC returns 403 to scripts, so the user must download it.
 - **Fork:**
-  - push `cd71f56` and `d007851`;
-  - fix the OJAp `deluxetable` guidance;
+  - push the local commits (the push was refused by the permission check);
   - the recommendations in section 10.
 - **Workspace:**
   - the user to delete the empty `refs_corpus/kb.sqlite`;
-  - unpushed commits in the code repository;
-  - the per-gas layer-state option in tellurix, implemented and tested but not yet committed.
+  - push the unpushed commits in the code repository.
 
 ---
 
